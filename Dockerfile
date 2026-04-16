@@ -1,5 +1,5 @@
 FROM ghcr.io/ztx888/halowebui:main
-
+FROM cloudflare/cloudflared:latest
 USER root
 
 RUN apt-get update && apt-get upgrade -y \
