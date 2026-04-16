@@ -1,14 +1,11 @@
-# 从官方镜像获取 cloudflared
 FROM cloudflare/cloudflared:latest AS cloudflared
 
 FROM ghcr.io/ztx888/halowebui:main
 
 USER root
 
-# 复制 cloudflared 二进制文件
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
-# 安装其他依赖
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl tzdata \
     && SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64" \
@@ -66,7 +63,7 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 入口脚本
+# 入口脚本（cloudflared 日志输出到 stdout）
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
     echo 'mkdir -p /tmp/backups /app/backend/data' >> /app/entrypoint.sh && \
@@ -89,14 +86,13 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo 'if [ -n "$CF_TUNNEL_TOKEN" ]; then' >> /app/entrypoint.sh && \
     echo '    echo "Tunnel:   starting..."' >> /app/entrypoint.sh && \
-    echo '    nohup cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" > /tmp/cloudflared.log 2>&1 &' >> /app/entrypoint.sh && \
+    echo '    cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" 2>&1 | sed "s/^/[cloudflared] /" &' >> /app/entrypoint.sh && \
     echo '    CF_PID=$!' >> /app/entrypoint.sh && \
-    echo '    sleep 3' >> /app/entrypoint.sh && \
+    echo '    sleep 5' >> /app/entrypoint.sh && \
     echo '    if kill -0 $CF_PID 2>/dev/null; then' >> /app/entrypoint.sh && \
     echo '        echo "Tunnel:   running (PID: $CF_PID)"' >> /app/entrypoint.sh && \
     echo '    else' >> /app/entrypoint.sh && \
-    echo '        echo "Tunnel:   FAILED"' >> /app/entrypoint.sh && \
-    echo '        cat /tmp/cloudflared.log' >> /app/entrypoint.sh && \
+    echo '        echo "Tunnel:   FAILED to start"' >> /app/entrypoint.sh && \
     echo '    fi' >> /app/entrypoint.sh && \
     echo 'else' >> /app/entrypoint.sh && \
     echo '    echo "Tunnel:   disabled"' >> /app/entrypoint.sh && \
