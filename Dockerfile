@@ -4,7 +4,7 @@ USER root
 
 # 安装依赖和修复漏洞
 RUN apt-get update && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl tzdata \
     && SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64" \
     && curl -fsSL "$SUPERCRONIC_URL" -o /usr/local/bin/supercronic \
     && chmod +x /usr/local/bin/supercronic \
@@ -13,157 +13,91 @@ RUN apt-get update && apt-get upgrade -y \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# 创建备份目录
+# 创建目录
 RUN mkdir -p /app/backups && chown -R 10014:10014 /app/backups
 
 # 创建备份脚本
-RUN cat > /app/backup.sh << 'EOF'
-#!/bin/bash
-set -e
-
-BACKUP_DIR="/app/backups"
-DATA_DIR="/app/backend/data"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="backup_$DATE.tar.gz"
-
-echo "[$(date)] Starting backup..."
-
-# 创建压缩备份
-if [ -d "$DATA_DIR" ]; then
-    tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C /app/backend data
-    echo "[$(date)] Created: $BACKUP_FILE"
-else
-    echo "[$(date)] Warning: $DATA_DIR not found"
-    exit 0
-fi
-
-# 上传到 Hugging Face
-if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then
-    huggingface-cli upload "$HF_REPO" "$BACKUP_DIR/$BACKUP_FILE" "$BACKUP_FILE" \
-        --repo-type dataset --token "$HF_TOKEN"
-    echo "[$(date)] Uploaded to HF: $HF_REPO"
-fi
-
-# 保留最新5份备份（本地和远程）
-cd "$BACKUP_DIR"
-ls -t backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
-echo "[$(date)] Cleanup completed, kept latest 5 backups"
-
-# 清理 HF 远程旧备份（保留5份）
-if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then
-    python3 << 'PYTHON'
-import os
-from huggingface_hub import HfApi, list_repo_files
-
-api = HfApi(token=os.environ.get("HF_TOKEN"))
-repo_id = os.environ.get("HF_REPO")
-
-try:
-    files = [f for f in list_repo_files(repo_id, repo_type="dataset") if f.startswith("backup_")]
-    files.sort(reverse=True)
-    for old_file in files[5:]:
-        api.delete_file(old_file, repo_id, repo_type="dataset")
-        print(f"Deleted remote: {old_file}")
-except Exception as e:
-    print(f"Remote cleanup warning: {e}")
-PYTHON
-fi
-
-echo "[$(date)] Backup completed successfully"
-EOF
+RUN echo '#!/bin/bash' > /app/backup.sh && \
+    echo 'set -e' >> /app/backup.sh && \
+    echo 'BACKUP_DIR="/app/backups"' >> /app/backup.sh && \
+    echo 'DATA_DIR="/app/backend/data"' >> /app/backup.sh && \
+    echo 'DATE=$(date +%Y%m%d_%H%M%S)' >> /app/backup.sh && \
+    echo 'BACKUP_FILE="backup_$DATE.tar.gz"' >> /app/backup.sh && \
+    echo 'echo "[$(date)] Starting backup..."' >> /app/backup.sh && \
+    echo 'if [ -d "$DATA_DIR" ]; then' >> /app/backup.sh && \
+    echo '    tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C /app/backend data' >> /app/backup.sh && \
+    echo '    echo "[$(date)] Created: $BACKUP_FILE"' >> /app/backup.sh && \
+    echo 'else' >> /app/backup.sh && \
+    echo '    echo "[$(date)] Warning: $DATA_DIR not found"' >> /app/backup.sh && \
+    echo '    exit 0' >> /app/backup.sh && \
+    echo 'fi' >> /app/backup.sh && \
+    echo 'if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then' >> /app/backup.sh && \
+    echo '    huggingface-cli upload "$HF_REPO" "$BACKUP_DIR/$BACKUP_FILE" "$BACKUP_FILE" --repo-type dataset --token "$HF_TOKEN"' >> /app/backup.sh && \
+    echo '    echo "[$(date)] Uploaded to HF: $HF_REPO"' >> /app/backup.sh && \
+    echo 'fi' >> /app/backup.sh && \
+    echo 'cd "$BACKUP_DIR"' >> /app/backup.sh && \
+    echo 'ls -t backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f' >> /app/backup.sh && \
+    echo 'echo "[$(date)] Backup completed"' >> /app/backup.sh
 
 # 创建恢复脚本
-RUN cat > /app/restore.sh << 'EOF'
-#!/bin/bash
-set -e
+RUN echo '#!/bin/bash' > /app/restore.sh && \
+    echo 'set -e' >> /app/restore.sh && \
+    echo 'BACKUP_DIR="/app/backups"' >> /app/restore.sh && \
+    echo 'DATA_DIR="/app/backend/data"' >> /app/restore.sh && \
+    echo 'echo "[$(date)] Checking for restore..."' >> /app/restore.sh && \
+    echo 'if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Fetching from HF..."' >> /app/restore.sh && \
+    echo '    huggingface-cli download "$HF_REPO" --repo-type dataset --local-dir "$BACKUP_DIR" --token "$HF_TOKEN" || true' >> /app/restore.sh && \
+    echo 'fi' >> /app/restore.sh && \
+    echo 'LATEST=$(ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | head -n 1)' >> /app/restore.sh && \
+    echo 'if [ -n "$LATEST" ] && [ -f "$LATEST" ]; then' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Restoring: $LATEST"' >> /app/restore.sh && \
+    echo '    rm -rf "$DATA_DIR"' >> /app/restore.sh && \
+    echo '    mkdir -p /app/backend' >> /app/restore.sh && \
+    echo '    tar -xzf "$LATEST" -C /app/backend' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Restore done"' >> /app/restore.sh && \
+    echo 'else' >> /app/restore.sh && \
+    echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
+    echo 'fi' >> /app/restore.sh
 
-BACKUP_DIR="/app/backups"
-DATA_DIR="/app/backend/data"
-
-echo "[$(date)] Checking for backups to restore..."
-
-# 从 HF 下载最新备份
-if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then
-    echo "[$(date)] Fetching latest backup from HF..."
-    python3 << 'PYTHON'
-import os
-from huggingface_hub import hf_hub_download, list_repo_files
-
-repo_id = os.environ.get("HF_REPO")
-token = os.environ.get("HF_TOKEN")
-backup_dir = "/app/backups"
-
-try:
-    files = [f for f in list_repo_files(repo_id, repo_type="dataset", token=token) if f.startswith("backup_")]
-    if files:
-        files.sort(reverse=True)
-        latest = files[0]
-        local_path = os.path.join(backup_dir, latest)
-        if not os.path.exists(local_path):
-            hf_hub_download(repo_id, latest, repo_type="dataset", token=token, local_dir=backup_dir)
-            print(f"Downloaded: {latest}")
-        else:
-            print(f"Already exists: {latest}")
-    else:
-        print("No backups found on HF")
-except Exception as e:
-    print(f"Download warning: {e}")
-PYTHON
-fi
-
-# 查找最新本地备份并恢复
-LATEST_BACKUP=$(ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | head -n 1)
-
-if [ -n "$LATEST_BACKUP" ] && [ -f "$LATEST_BACKUP" ]; then
-    echo "[$(date)] Restoring from: $LATEST_BACKUP"
-    
-    # 备份现有数据（如果存在）
-    if [ -d "$DATA_DIR" ]; then
-        mv "$DATA_DIR" "${DATA_DIR}.old.$$"
-    fi
-    
-    # 解压恢复
-    mkdir -p /app/backend
-    tar -xzf "$LATEST_BACKUP" -C /app/backend
-    
-    # 清理旧数据
-    rm -rf "${DATA_DIR}.old.$$"
-    
-    echo "[$(date)] Restore completed successfully"
-else
-    echo "[$(date)] No backup found, starting fresh"
-fi
-EOF
-
-# 创建 crontab（每天凌晨2点备份）
-RUN echo "0 2 * * * /app/backup.sh >> /app/backups/backup.log 2>&1" > /app/crontab
-
-# 创建入口脚本
-RUN cat > /app/entrypoint.sh << 'EOF'
-#!/bin/bash
-set -e
-
-echo "========================================"
-echo "Container starting at $(date)"
-echo "========================================"
-
-# 执行恢复
-/app/restore.sh
-
-# 启动定时备份（后台）
-echo "[$(date)] Starting supercronic..."
-supercronic /app/crontab &
-
-# 启动主应用（根据原镜像调整）
-echo "[$(date)] Starting main application..."
-exec "$@"
-EOF
+# 创建入口脚本（动态生成crontab）
+RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
+    echo 'set -e' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# 默认北京时间凌晨3点' >> /app/entrypoint.sh && \
+    echo 'BACKUP_HOUR="${BACKUP_HOUR:-3}"' >> /app/entrypoint.sh && \
+    echo 'BACKUP_MINUTE="${BACKUP_MINUTE:-0}"' >> /app/entrypoint.sh && \
+    echo 'BACKUP_CRON="${BACKUP_CRON:-}"' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# 生成 crontab' >> /app/entrypoint.sh && \
+    echo 'if [ -n "$BACKUP_CRON" ]; then' >> /app/entrypoint.sh && \
+    echo '    CRON_EXPR="$BACKUP_CRON"' >> /app/entrypoint.sh && \
+    echo 'else' >> /app/entrypoint.sh && \
+    echo '    CRON_EXPR="$BACKUP_MINUTE $BACKUP_HOUR * * *"' >> /app/entrypoint.sh && \
+    echo 'fi' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo 'echo "$CRON_EXPR /app/backup.sh >> /app/backups/backup.log 2>&1" > /app/crontab' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo 'echo "=== Container starting at $(date) ==="' >> /app/entrypoint.sh && \
+    echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
+    echo 'echo "Backup schedule: $CRON_EXPR"' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '/app/restore.sh' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo 'supercronic /app/crontab &' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo 'exec "$@"' >> /app/entrypoint.sh
 
 # 设置权限
 RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh \
-    && chown -R 10014:10014 /app/backup.sh /app/restore.sh /app/entrypoint.sh /app/crontab /app/backups
+    && chown -R 10014:10014 /app/backup.sh /app/restore.sh /app/entrypoint.sh /app/backups
+
+# 默认时区：北京时间
+ENV TZ=Asia/Shanghai
+ENV BACKUP_HOUR=3
+ENV BACKUP_MINUTE=0
 
 USER 10014
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["python", "main.py"]
+CMD ["bash", "start.sh"]
