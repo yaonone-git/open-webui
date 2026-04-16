@@ -13,16 +13,14 @@ RUN apt-get update && apt-get upgrade -y \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
-# 创建目录
-RUN mkdir -p /app/backups && chown -R 10014:10014 /app/backups
-
 # 创建备份脚本
 RUN echo '#!/bin/bash' > /app/backup.sh && \
     echo 'set -e' >> /app/backup.sh && \
-    echo 'BACKUP_DIR="/app/backups"' >> /app/backup.sh && \
+    echo 'BACKUP_DIR="/tmp/backups"' >> /app/backup.sh && \
     echo 'DATA_DIR="/app/backend/data"' >> /app/backup.sh && \
     echo 'DATE=$(date +%Y%m%d_%H%M%S)' >> /app/backup.sh && \
     echo 'BACKUP_FILE="backup_$DATE.tar.gz"' >> /app/backup.sh && \
+    echo 'mkdir -p "$BACKUP_DIR"' >> /app/backup.sh && \
     echo 'echo "[$(date)] Starting backup..."' >> /app/backup.sh && \
     echo 'if [ -d "$DATA_DIR" ]; then' >> /app/backup.sh && \
     echo '    tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C /app/backend data' >> /app/backup.sh && \
@@ -42,8 +40,9 @@ RUN echo '#!/bin/bash' > /app/backup.sh && \
 # 创建恢复脚本
 RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo 'set -e' >> /app/restore.sh && \
-    echo 'BACKUP_DIR="/app/backups"' >> /app/restore.sh && \
+    echo 'BACKUP_DIR="/tmp/backups"' >> /app/restore.sh && \
     echo 'DATA_DIR="/app/backend/data"' >> /app/restore.sh && \
+    echo 'mkdir -p "$BACKUP_DIR"' >> /app/restore.sh && \
     echo 'echo "[$(date)] Checking for restore..."' >> /app/restore.sh && \
     echo 'if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO" ]; then' >> /app/restore.sh && \
     echo '    echo "[$(date)] Fetching from HF..."' >> /app/restore.sh && \
@@ -60,23 +59,26 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 创建入口脚本（动态生成crontab）
+# 创建入口脚本（使用 /tmp 存储动态文件）
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# 创建可写目录' >> /app/entrypoint.sh && \
+    echo 'mkdir -p /tmp/backups' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo '# 默认北京时间凌晨3点' >> /app/entrypoint.sh && \
     echo 'BACKUP_HOUR="${BACKUP_HOUR:-3}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_MINUTE="${BACKUP_MINUTE:-0}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_CRON="${BACKUP_CRON:-}"' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo '# 生成 crontab' >> /app/entrypoint.sh && \
+    echo '# 生成 crontab 到 /tmp' >> /app/entrypoint.sh && \
     echo 'if [ -n "$BACKUP_CRON" ]; then' >> /app/entrypoint.sh && \
     echo '    CRON_EXPR="$BACKUP_CRON"' >> /app/entrypoint.sh && \
     echo 'else' >> /app/entrypoint.sh && \
     echo '    CRON_EXPR="$BACKUP_MINUTE $BACKUP_HOUR * * *"' >> /app/entrypoint.sh && \
     echo 'fi' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo 'echo "$CRON_EXPR /app/backup.sh >> /app/backups/backup.log 2>&1" > /app/crontab' >> /app/entrypoint.sh && \
+    echo 'echo "$CRON_EXPR /app/backup.sh >> /tmp/backups/backup.log 2>&1" > /tmp/crontab' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo 'echo "=== Container starting at $(date) ==="' >> /app/entrypoint.sh && \
     echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
@@ -84,13 +86,12 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo '/app/restore.sh' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo 'supercronic /app/crontab &' >> /app/entrypoint.sh && \
+    echo 'supercronic /tmp/crontab &' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo 'exec "$@"' >> /app/entrypoint.sh
 
 # 设置权限
-RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh \
-    && chown -R 10014:10014 /app/backup.sh /app/restore.sh /app/entrypoint.sh /app/backups
+RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
 
 # 默认时区：北京时间
 ENV TZ=Asia/Shanghai
