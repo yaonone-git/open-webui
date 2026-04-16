@@ -1,6 +1,13 @@
+# ============ 阶段1：从 cloudflared 镜像复制二进制文件 ============
+FROM cloudflare/cloudflared:latest AS cloudflared
+
+# ============ 阶段2：主镜像 ============
 FROM ghcr.io/ztx888/halowebui:main
-FROM cloudflare/cloudflared:latest
+
 USER root
+
+# 从 cloudflared 镜像复制二进制文件
+COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl tzdata \
@@ -59,7 +66,7 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 入口脚本
+# 入口脚本 (增加 cloudflared)
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
     echo 'mkdir -p /tmp/backups /app/backend/data' >> /app/entrypoint.sh && \
@@ -79,6 +86,11 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'echo "=========================================="' >> /app/entrypoint.sh && \
     echo '/app/restore.sh' >> /app/entrypoint.sh && \
     echo 'supercronic /tmp/crontab &' >> /app/entrypoint.sh && \
+    echo '# 启动 cloudflared (如果设置了 TUNNEL_TOKEN)' >> /app/entrypoint.sh && \
+    echo 'if [ -n "$TUNNEL_TOKEN" ]; then' >> /app/entrypoint.sh && \
+    echo '    echo "Starting cloudflared tunnel..."' >> /app/entrypoint.sh && \
+    echo '    cloudflared tunnel --no-autoupdate run --token "$TUNNEL_TOKEN" &' >> /app/entrypoint.sh && \
+    echo 'fi' >> /app/entrypoint.sh && \
     echo 'exec "$@"' >> /app/entrypoint.sh
 
 RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
@@ -86,6 +98,7 @@ RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
 ENV TZ=Asia/Shanghai
 ENV BACKUP_HOUR=3
 ENV BACKUP_MINUTE=0
+ENV TUNNEL_TOKEN=""
 
 USER 10014
 
