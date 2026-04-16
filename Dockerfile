@@ -1,14 +1,19 @@
+# 从官方镜像获取 cloudflared
+FROM cloudflare/cloudflared:latest AS cloudflared
+
 FROM ghcr.io/ztx888/halowebui:main
 
 USER root
 
+# 复制 cloudflared 二进制文件
+COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+
+# 安装其他依赖
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl tzdata \
     && SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64" \
     && curl -fsSL "$SUPERCRONIC_URL" -o /usr/local/bin/supercronic \
     && chmod +x /usr/local/bin/supercronic \
-    && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" -o /usr/local/bin/cloudflared \
-    && chmod +x /usr/local/bin/cloudflared \
     && pip install --no-cache-dir "Authlib>=1.6.9" "huggingface_hub>=0.20.0" \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
@@ -61,7 +66,7 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 入口脚本（改进 cloudflared 启动）
+# 入口脚本
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
     echo 'mkdir -p /tmp/backups /app/backend/data' >> /app/entrypoint.sh && \
@@ -82,7 +87,6 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
     echo 'echo "Backup:   $CRON_EXPR"' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo '# 启动 Cloudflare Tunnel' >> /app/entrypoint.sh && \
     echo 'if [ -n "$CF_TUNNEL_TOKEN" ]; then' >> /app/entrypoint.sh && \
     echo '    echo "Tunnel:   starting..."' >> /app/entrypoint.sh && \
     echo '    nohup cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" > /tmp/cloudflared.log 2>&1 &' >> /app/entrypoint.sh && \
@@ -91,11 +95,11 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo '    if kill -0 $CF_PID 2>/dev/null; then' >> /app/entrypoint.sh && \
     echo '        echo "Tunnel:   running (PID: $CF_PID)"' >> /app/entrypoint.sh && \
     echo '    else' >> /app/entrypoint.sh && \
-    echo '        echo "Tunnel:   FAILED - check /tmp/cloudflared.log"' >> /app/entrypoint.sh && \
+    echo '        echo "Tunnel:   FAILED"' >> /app/entrypoint.sh && \
     echo '        cat /tmp/cloudflared.log' >> /app/entrypoint.sh && \
     echo '    fi' >> /app/entrypoint.sh && \
     echo 'else' >> /app/entrypoint.sh && \
-    echo '    echo "Tunnel:   disabled (no CF_TUNNEL_TOKEN)"' >> /app/entrypoint.sh && \
+    echo '    echo "Tunnel:   disabled"' >> /app/entrypoint.sh && \
     echo 'fi' >> /app/entrypoint.sh && \
     echo 'echo "=========================================="' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
