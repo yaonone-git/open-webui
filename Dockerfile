@@ -1,10 +1,6 @@
-FROM cloudflare/cloudflared:latest AS cloudflared
-
 FROM ghcr.io/ztx888/halowebui:main
 
 USER root
-
-COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
 RUN apt-get update && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl tzdata \
@@ -63,43 +59,24 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 入口脚本（添加协议选择）
+# 入口脚本
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
     echo 'mkdir -p /tmp/backups /app/backend/data' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
     echo 'BACKUP_HOUR="${BACKUP_HOUR:-3}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_MINUTE="${BACKUP_MINUTE:-0}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_CRON="${BACKUP_CRON:-}"' >> /app/entrypoint.sh && \
-    echo 'CF_PROTOCOL="${CF_PROTOCOL:-http2}"' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
     echo 'if [ -n "$BACKUP_CRON" ]; then' >> /app/entrypoint.sh && \
     echo '    CRON_EXPR="$BACKUP_CRON"' >> /app/entrypoint.sh && \
     echo 'else' >> /app/entrypoint.sh && \
     echo '    CRON_EXPR="$BACKUP_MINUTE $BACKUP_HOUR * * *"' >> /app/entrypoint.sh && \
     echo 'fi' >> /app/entrypoint.sh && \
     echo 'echo "$CRON_EXPR /app/backup.sh >> /tmp/backup.log 2>&1" > /tmp/crontab' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
     echo 'echo "=========================================="' >> /app/entrypoint.sh && \
     echo 'echo "Container starting: $(date)"' >> /app/entrypoint.sh && \
     echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
     echo 'echo "Backup:   $CRON_EXPR"' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
-    echo 'if [ -n "$CF_TUNNEL_TOKEN" ]; then' >> /app/entrypoint.sh && \
-    echo '    echo "Tunnel:   starting (protocol: $CF_PROTOCOL)..."' >> /app/entrypoint.sh && \
-    echo '    cloudflared tunnel --no-autoupdate --protocol "$CF_PROTOCOL" run --token "$CF_TUNNEL_TOKEN" 2>&1 | sed "s/^/[cloudflared] /" &' >> /app/entrypoint.sh && \
-    echo '    CF_PID=$!' >> /app/entrypoint.sh && \
-    echo '    sleep 5' >> /app/entrypoint.sh && \
-    echo '    if kill -0 $CF_PID 2>/dev/null; then' >> /app/entrypoint.sh && \
-    echo '        echo "Tunnel:   running (PID: $CF_PID)"' >> /app/entrypoint.sh && \
-    echo '    else' >> /app/entrypoint.sh && \
-    echo '        echo "Tunnel:   FAILED"' >> /app/entrypoint.sh && \
-    echo '    fi' >> /app/entrypoint.sh && \
-    echo 'else' >> /app/entrypoint.sh && \
-    echo '    echo "Tunnel:   disabled"' >> /app/entrypoint.sh && \
-    echo 'fi' >> /app/entrypoint.sh && \
     echo 'echo "=========================================="' >> /app/entrypoint.sh && \
-    echo '' >> /app/entrypoint.sh && \
     echo '/app/restore.sh' >> /app/entrypoint.sh && \
     echo 'supercronic /tmp/crontab &' >> /app/entrypoint.sh && \
     echo 'exec "$@"' >> /app/entrypoint.sh
@@ -109,7 +86,6 @@ RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
 ENV TZ=Asia/Shanghai
 ENV BACKUP_HOUR=3
 ENV BACKUP_MINUTE=0
-ENV CF_PROTOCOL=http2
 
 USER 10014
 
