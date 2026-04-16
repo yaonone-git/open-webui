@@ -8,6 +8,9 @@ RUN apt-get update && apt-get upgrade -y \
     && SUPERCRONIC_URL="https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-amd64" \
     && curl -fsSL "$SUPERCRONIC_URL" -o /usr/local/bin/supercronic \
     && chmod +x /usr/local/bin/supercronic \
+    && CLOUDFLARED_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" \
+    && curl -fsSL "$CLOUDFLARED_URL" -o /usr/local/bin/cloudflared \
+    && chmod +x /usr/local/bin/cloudflared \
     && pip install --no-cache-dir "Authlib>=1.6.9" "huggingface_hub>=0.20.0" \
     && apt-get purge -y curl \
     && apt-get autoremove -y \
@@ -56,17 +59,17 @@ RUN echo '#!/bin/bash' > /app/restore.sh && \
     echo '    tar -xzf "$LATEST" -C /app/backend' >> /app/restore.sh && \
     echo '    echo "[$(date)] Restore done"' >> /app/restore.sh && \
     echo 'else' >> /app/restore.sh && \
-    echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
+    echo '    echo "[$(date)] No backup found, starting fresh"' >> /app/restore.sh && \
     echo 'fi' >> /app/restore.sh
 
-# 创建入口脚本（使用 /tmp 存储动态文件）
+# 创建入口脚本
 RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'set -e' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo '# 创建可写目录' >> /app/entrypoint.sh && \
     echo 'mkdir -p /tmp/backups' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo '# 默认北京时间凌晨3点' >> /app/entrypoint.sh && \
+    echo '# 备份时间设置' >> /app/entrypoint.sh && \
     echo 'BACKUP_HOUR="${BACKUP_HOUR:-3}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_MINUTE="${BACKUP_MINUTE:-0}"' >> /app/entrypoint.sh && \
     echo 'BACKUP_CRON="${BACKUP_CRON:-}"' >> /app/entrypoint.sh && \
@@ -80,23 +83,39 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo 'echo "$CRON_EXPR /app/backup.sh >> /tmp/backups/backup.log 2>&1" > /tmp/crontab' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
-    echo 'echo "=== Container starting at $(date) ==="' >> /app/entrypoint.sh && \
-    echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
-    echo 'echo "Backup schedule: $CRON_EXPR"' >> /app/entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/entrypoint.sh && \
+    echo 'echo "Container starting at $(date)"' >> /app/entrypoint.sh && \
+    echo 'echo "Timezone     : $TZ"' >> /app/entrypoint.sh && \
+    echo 'echo "Backup cron  : $CRON_EXPR"' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
+    echo '# 启动 Cloudflare Tunnel' >> /app/entrypoint.sh && \
+    echo 'if [ -n "$CF_TUNNEL_TOKEN" ]; then' >> /app/entrypoint.sh && \
+    echo '    echo "CF Tunnel    : enabled"' >> /app/entrypoint.sh && \
+    echo '    cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" >> /tmp/cloudflared.log 2>&1 &' >> /app/entrypoint.sh && \
+    echo '    CF_PID=$!' >> /app/entrypoint.sh && \
+    echo '    echo "CF Tunnel PID: $CF_PID"' >> /app/entrypoint.sh && \
+    echo 'else' >> /app/entrypoint.sh && \
+    echo '    echo "CF Tunnel    : disabled (CF_TUNNEL_TOKEN not set)"' >> /app/entrypoint.sh && \
+    echo 'fi' >> /app/entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# 执行数据恢复' >> /app/entrypoint.sh && \
     echo '/app/restore.sh' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
+    echo '# 启动定时备份' >> /app/entrypoint.sh && \
     echo 'supercronic /tmp/crontab &' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
+    echo '# 启动主应用' >> /app/entrypoint.sh && \
     echo 'exec "$@"' >> /app/entrypoint.sh
 
 # 设置权限
 RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
 
-# 默认时区：北京时间
+# 默认环境变量
 ENV TZ=Asia/Shanghai
 ENV BACKUP_HOUR=3
 ENV BACKUP_MINUTE=0
+ENV CF_TUNNEL_TOKEN=""
 
 USER 10014
 
