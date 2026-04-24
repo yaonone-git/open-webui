@@ -14,109 +14,82 @@ RUN apt-get update && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 备份脚本
-RUN cat > /app/backup.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-BACKUP_DIR="/tmp/backups"
-DATA_DIR="/app/backend/data"
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="backup_$DATE.tar.gz"
-
-mkdir -p "$BACKUP_DIR"
-
-echo "[$(date)] Starting backup..."
-echo "[$(date)] DATA_DIR=$DATA_DIR"
-echo "[$(date)] BACKUP_DIR=$BACKUP_DIR"
-
-if [ ! -d "$DATA_DIR" ]; then
-    echo "[$(date)] $DATA_DIR not found, skip"
-    exit 0
-fi
-
-if [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then
-    echo "[$(date)] $DATA_DIR is empty, skip"
-    exit 0
-fi
-
-tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C "$DATA_DIR" .
-echo "[$(date)] Created: $BACKUP_FILE"
-
-if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
-    echo "[$(date)] Uploading to HF repo: $HF_REPO"
-    huggingface-cli upload "$HF_REPO" "$BACKUP_DIR/$BACKUP_FILE" "$BACKUP_FILE" --repo-type dataset --token "$HF_TOKEN"
-    echo "[$(date)] Uploaded to HF"
-else
-    echo "[$(date)] HF_TOKEN or HF_REPO not set, skip upload"
-fi
-
-ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
-echo "[$(date)] Backup completed"
-EOF
+RUN echo '#!/bin/bash' > /app/backup.sh && \
+    echo 'set -euo pipefail' >> /app/backup.sh && \
+    echo 'BACKUP_DIR="/tmp/backups"' >> /app/backup.sh && \
+    echo 'DATA_DIR="/app/backend/data"' >> /app/backup.sh && \
+    echo 'DATE=$(date +%Y%m%d_%H%M%S)' >> /app/backup.sh && \
+    echo 'BACKUP_FILE="backup_$DATE.tar.gz"' >> /app/backup.sh && \
+    echo 'mkdir -p "$BACKUP_DIR"' >> /app/backup.sh && \
+    echo 'echo "[$(date)] Starting backup..."' >> /app/backup.sh && \
+    echo 'echo "[$(date)] DATA_DIR=$DATA_DIR"' >> /app/backup.sh && \
+    echo 'echo "[$(date)] BACKUP_DIR=$BACKUP_DIR"' >> /app/backup.sh && \
+    echo 'if [ ! -d "$DATA_DIR" ]; then' >> /app/backup.sh && \
+    echo '    echo "[$(date)] $DATA_DIR not found, skip"' >> /app/backup.sh && \
+    echo '    exit 0' >> /app/backup.sh && \
+    echo 'fi' >> /app/backup.sh && \
+    echo 'if [ -z "$(ls -A "$DATA_DIR" 2>/dev/null)" ]; then' >> /app/backup.sh && \
+    echo '    echo "[$(date)] $DATA_DIR is empty, skip"' >> /app/backup.sh && \
+    echo '    exit 0' >> /app/backup.sh && \
+    echo 'fi' >> /app/backup.sh && \
+    echo 'tar -czf "$BACKUP_DIR/$BACKUP_FILE" -C "$DATA_DIR" .' >> /app/backup.sh && \
+    echo 'echo "[$(date)] Created: $BACKUP_FILE"' >> /app/backup.sh && \
+    echo 'if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then' >> /app/backup.sh && \
+    echo '    echo "[$(date)] Uploading to HF repo: $HF_REPO"' >> /app/backup.sh && \
+    echo '    huggingface-cli upload "$HF_REPO" "$BACKUP_DIR/$BACKUP_FILE" "$BACKUP_FILE" --repo-type dataset --token "$HF_TOKEN"' >> /app/backup.sh && \
+    echo '    echo "[$(date)] Uploaded to HF"' >> /app/backup.sh && \
+    echo 'else' >> /app/backup.sh && \
+    echo '    echo "[$(date)] HF_TOKEN or HF_REPO not set, skip upload"' >> /app/backup.sh && \
+    echo 'fi' >> /app/backup.sh && \
+    echo 'ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f' >> /app/backup.sh && \
+    echo 'echo "[$(date)] Backup completed"' >> /app/backup.sh
 
 # 恢复脚本
-RUN cat > /app/restore.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-BACKUP_DIR="/tmp/backups"
-DATA_DIR="/app/backend/data"
-
-mkdir -p "$BACKUP_DIR"
-
-echo "[$(date)] Starting restore..."
-
-if [ ! -d "$DATA_DIR" ]; then
-    echo "[$(date)] $DATA_DIR not found, skip restore"
-    exit 0
-fi
-
-if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
-    echo "[$(date)] Downloading from HF..."
-    huggingface-cli download "$HF_REPO" --repo-type dataset --local-dir "$BACKUP_DIR" --token "$HF_TOKEN" 2>/dev/null || true
-fi
-
-LATEST=$(ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | head -n 1 || true)
-
-if [ -n "$LATEST" ] && [ -f "$LATEST" ]; then
-    echo "[$(date)] Restoring: $LATEST"
-    rm -rf "$DATA_DIR"/*
-    tar -xzf "$LATEST" -C "$DATA_DIR"
-    echo "[$(date)] Restore completed"
-else
-    echo "[$(date)] No backup found"
-fi
-EOF
+RUN echo '#!/bin/bash' > /app/restore.sh && \
+    echo 'set -euo pipefail' >> /app/restore.sh && \
+    echo 'BACKUP_DIR="/tmp/backups"' >> /app/restore.sh && \
+    echo 'DATA_DIR="/app/backend/data"' >> /app/restore.sh && \
+    echo 'mkdir -p "$BACKUP_DIR"' >> /app/restore.sh && \
+    echo 'echo "[$(date)] Starting restore..."' >> /app/restore.sh && \
+    echo 'if [ ! -d "$DATA_DIR" ]; then' >> /app/restore.sh && \
+    echo '    echo "[$(date)] $DATA_DIR not found, skip restore"' >> /app/restore.sh && \
+    echo '    exit 0' >> /app/restore.sh && \
+    echo 'fi' >> /app/restore.sh && \
+    echo 'if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Downloading from HF..."' >> /app/restore.sh && \
+    echo '    huggingface-cli download "$HF_REPO" --repo-type dataset --local-dir "$BACKUP_DIR" --token "$HF_TOKEN" 2>/dev/null || true' >> /app/restore.sh && \
+    echo 'fi' >> /app/restore.sh && \
+    echo 'LATEST=$(ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | head -n 1 || true)' >> /app/restore.sh && \
+    echo 'if [ -n "$LATEST" ] && [ -f "$LATEST" ]; then' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Restoring: $LATEST"' >> /app/restore.sh && \
+    echo '    rm -rf "$DATA_DIR"/*' >> /app/restore.sh && \
+    echo '    tar -xzf "$LATEST" -C "$DATA_DIR"' >> /app/restore.sh && \
+    echo '    echo "[$(date)] Restore completed"' >> /app/restore.sh && \
+    echo 'else' >> /app/restore.sh && \
+    echo '    echo "[$(date)] No backup found"' >> /app/restore.sh && \
+    echo 'fi' >> /app/restore.sh
 
 # 入口脚本
-RUN cat > /app/entrypoint.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-mkdir -p /tmp/backups /tmp/huggingface /tmp/.cache
-
-BACKUP_HOUR="${BACKUP_HOUR:-3}"
-BACKUP_MINUTE="${BACKUP_MINUTE:-0}"
-BACKUP_CRON="${BACKUP_CRON:-}"
-
-if [ -n "$BACKUP_CRON" ]; then
-    CRON_EXPR="$BACKUP_CRON"
-else
-    CRON_EXPR="$BACKUP_MINUTE $BACKUP_HOUR * * *"
-fi
-
-echo "$CRON_EXPR /app/backup.sh >> /tmp/backup.log 2>&1" > /tmp/crontab
-
-echo "=========================================="
-echo "Container starting: $(date)"
-echo "Timezone: $TZ"
-echo "Backup:   $CRON_EXPR"
-echo "=========================================="
-
-/app/restore.sh || true
-supercronic /tmp/crontab &
-exec "$@"
-EOF
+RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
+    echo 'set -euo pipefail' >> /app/entrypoint.sh && \
+    echo 'mkdir -p /tmp/backups /tmp/huggingface /tmp/.cache' >> /app/entrypoint.sh && \
+    echo 'BACKUP_HOUR="${BACKUP_HOUR:-3}"' >> /app/entrypoint.sh && \
+    echo 'BACKUP_MINUTE="${BACKUP_MINUTE:-0}"' >> /app/entrypoint.sh && \
+    echo 'BACKUP_CRON="${BACKUP_CRON:-}"' >> /app/entrypoint.sh && \
+    echo 'if [ -n "$BACKUP_CRON" ]; then' >> /app/entrypoint.sh && \
+    echo '    CRON_EXPR="$BACKUP_CRON"' >> /app/entrypoint.sh && \
+    echo 'else' >> /app/entrypoint.sh && \
+    echo '    CRON_EXPR="$BACKUP_MINUTE $BACKUP_HOUR * * *"' >> /app/entrypoint.sh && \
+    echo 'fi' >> /app/entrypoint.sh && \
+    echo 'echo "$CRON_EXPR /app/backup.sh >> /tmp/backup.log 2>&1" > /tmp/crontab' >> /app/entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/entrypoint.sh && \
+    echo 'echo "Container starting: $(date)"' >> /app/entrypoint.sh && \
+    echo 'echo "Timezone: $TZ"' >> /app/entrypoint.sh && \
+    echo 'echo "Backup:   $CRON_EXPR"' >> /app/entrypoint.sh && \
+    echo 'echo "=========================================="' >> /app/entrypoint.sh && \
+    echo '/app/restore.sh || true' >> /app/entrypoint.sh && \
+    echo 'supercronic /tmp/crontab &' >> /app/entrypoint.sh && \
+    echo 'exec "$@"' >> /app/entrypoint.sh
 
 RUN chmod +x /app/backup.sh /app/restore.sh /app/entrypoint.sh
 
