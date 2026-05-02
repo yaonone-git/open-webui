@@ -4,7 +4,6 @@ set -u
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
-
 require_env() {
   local name="$1"
   local value="${!name:-}"
@@ -13,7 +12,6 @@ require_env() {
     exit 1
   fi
 }
-
 require_env HF_TOKEN
 require_env HF_REPO_ID
 
