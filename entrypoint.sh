@@ -23,8 +23,17 @@ HF_PREFIX="${HF_PREFIX:-halowebui}"
 HF_PRIVATE="${HF_PRIVATE:-true}"
 BACKUP_INTERVAL_SECONDS="${BACKUP_INTERVAL_SECONDS:-21600}"
 INITIAL_BACKUP_DELAY_SECONDS="${INITIAL_BACKUP_DELAY_SECONDS:-30}"
+BACKUP_KEEP_LAST="${BACKUP_KEEP_LAST:-3}"
 
 HF_PREFIX="$(echo "$HF_PREFIX" | sed 's#^/##; s#/$##')"
+
+export DB_PATH
+export HF_REPO_TYPE
+export HF_PREFIX
+export HF_PRIVATE
+export BACKUP_INTERVAL_SECONDS
+export INITIAL_BACKUP_DELAY_SECONDS
+export BACKUP_KEEP_LAST
 
 if [ -n "$HF_PREFIX" ]; then
   HF_PREFIX_SLASH="${HF_PREFIX}/"
@@ -46,6 +55,7 @@ log "HF_PREFIX=$HF_PREFIX"
 log "HF_PRIVATE=$HF_PRIVATE"
 log "BACKUP_INTERVAL_SECONDS=$BACKUP_INTERVAL_SECONDS"
 log "INITIAL_BACKUP_DELAY_SECONDS=$INITIAL_BACKUP_DELAY_SECONDS"
+log "BACKUP_KEEP_LAST=$BACKUP_KEEP_LAST"
 log "APP_CMD=$*"
 
 db_is_valid() {
@@ -162,6 +172,82 @@ api.upload_file(
 PY
 }
 
+cleanup_old_backups() {
+  log "Cleaning old backups on Hugging Face, keep latest ${BACKUP_KEEP_LAST}..."
+
+  python3 - <<'PY'
+import os
+import sys
+from huggingface_hub import HfApi, CommitOperationDelete
+from huggingface_hub.errors import RepositoryNotFoundError
+
+token = os.environ["HF_TOKEN"]
+repo_id = os.environ["HF_REPO_ID"]
+repo_type = os.environ.get("HF_REPO_TYPE", "dataset")
+prefix = os.environ.get("HF_PREFIX", "").strip("/")
+
+try:
+    keep_last = int(os.environ.get("BACKUP_KEEP_LAST", "3"))
+except Exception:
+    keep_last = 3
+
+if keep_last < 1:
+    keep_last = 3
+
+prefix_slash = f"{prefix}/" if prefix else ""
+
+api = HfApi(token=token)
+
+try:
+    files = api.list_repo_files(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        token=token,
+    )
+except RepositoryNotFoundError:
+    print("Repository not found, skip cleanup")
+    sys.exit(0)
+except Exception as e:
+    print(f"List repo files failed, skip cleanup: {e}")
+    sys.exit(0)
+
+backups = [
+    f for f in files
+    if f.startswith(prefix_slash)
+    and f.endswith(".db.gz")
+]
+
+backups.sort()
+
+if len(backups) <= keep_last:
+    print(f"Backup count {len(backups)}, no cleanup needed")
+    sys.exit(0)
+
+delete_files = backups[:-keep_last]
+
+operations = [
+    CommitOperationDelete(path_in_repo=f)
+    for f in delete_files
+]
+
+try:
+    api.create_commit(
+        repo_id=repo_id,
+        repo_type=repo_type,
+        operations=operations,
+        commit_message=f"cleanup old backups, keep latest {keep_last}",
+        token=token,
+    )
+except Exception as e:
+    print(f"Delete old backups failed: {e}")
+    sys.exit(0)
+
+print("Deleted old backups:")
+for f in delete_files:
+    print(f"- {f}")
+PY
+}
+
 restore_latest_backup() {
   log "Checking latest backup from Hugging Face..."
 
@@ -264,6 +350,8 @@ backup_once() {
   log "Backup uploaded to hf.co/$HF_REPO_ID/blob/main/$path_in_repo"
   log "$backup_type backup finished"
 
+  cleanup_old_backups || true
+
   return 0
 }
 
@@ -271,6 +359,13 @@ wait_for_valid_db() {
   log "Waiting for valid database: $DB_PATH"
 
   while true; do
+    if [ -n "${APP_PID:-}" ]; then
+      if ! kill -0 "$APP_PID" 2>/dev/null; then
+        log "Application process exited while waiting for database"
+        return 1
+      fi
+    fi
+
     if db_is_valid; then
       log "Database is ready and valid"
       return 0
@@ -319,6 +414,8 @@ RESTORE_STATUS=$?
 if [ "$RESTORE_STATUS" -eq 0 ]; then
   REMOTE_BACKUP_EXISTS="true"
   log "Remote backup restored successfully"
+
+  cleanup_old_backups || true
 elif [ "$RESTORE_STATUS" -eq 1 ]; then
   REMOTE_BACKUP_EXISTS="false"
   log "No remote backup restored"
@@ -330,6 +427,7 @@ fi
 if [ "$REMOTE_BACKUP_EXISTS" = "false" ]; then
   if db_is_valid; then
     log "No remote backup, but local database exists. Creating initial backup before app start..."
+
     if backup_once "initial"; then
       INITIAL_BACKUP_DONE="true"
       log "Initial backup submitted successfully"
@@ -349,17 +447,19 @@ APP_PID="$!"
 if [ "$REMOTE_BACKUP_EXISTS" = "false" ] && [ "$INITIAL_BACKUP_DONE" = "false" ]; then
   log "Will create initial backup after application creates database"
 
-  wait_for_valid_db
+  if wait_for_valid_db; then
+    if [ "$INITIAL_BACKUP_DELAY_SECONDS" -gt 0 ] 2>/dev/null; then
+      log "Waiting ${INITIAL_BACKUP_DELAY_SECONDS}s before initial backup..."
+      sleep "$INITIAL_BACKUP_DELAY_SECONDS"
+    fi
 
-  if [ "$INITIAL_BACKUP_DELAY_SECONDS" -gt 0 ] 2>/dev/null; then
-    log "Waiting ${INITIAL_BACKUP_DELAY_SECONDS}s before initial backup..."
-    sleep "$INITIAL_BACKUP_DELAY_SECONDS"
-  fi
-
-  if backup_once "initial"; then
-    log "Initial backup submitted successfully"
+    if backup_once "initial"; then
+      log "Initial backup submitted successfully"
+    else
+      log "Initial backup failed"
+    fi
   else
-    log "Initial backup failed"
+    log "Skip initial backup because database is not ready"
   fi
 else
   log "Remote backup exists or initial backup already done, skip initial backup"
