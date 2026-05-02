@@ -1,7 +1,5 @@
 FROM ghcr.io/ztx888/halowebui:main
 
-USER root
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         sqlite3 \
